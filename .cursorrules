@@ -1,0 +1,91 @@
+# Skipit Intelligence — Chart Architecture Rules
+
+## Stack
+HTML + CSS + JS puro. Un solo archivo: index.html. Sin frameworks.
+Chart.js 4.4 + chartjs-plugin-datalabels. SheetJS para Excel.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## REGLA ABSOLUTA: Factories de gráficos
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Cada tipo de gráfico tiene UNA sola factory. Siempre usarla.
+NUNCA escribir `new Chart()` con options inline.
+NUNCA repetir config de tooltip fuera de una factory.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## 1. TORTA — renderDonut(...)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Comportamiento obligatorio:
+- Leyenda a la DERECHA, items ordenados de MAYOR a MENOR valor
+- Hover muestra: "Nombre: valor (X%)"
+- Colores: buildColorMap(labels)
+
+Firma:
+  renderDonut(canvasId, chartKey, map, colors, valueFormatter)
+  - map: Map<string, number> — ya puede venir en cualquier orden, renderDonut la ordena internamente
+  - colors: array de hex, o null para paleta automática
+  - valueFormatter: función (v) => string, ej: v => fmt.money(v)
+
+Ejemplo:
+  renderDonut('chartGender', 'gender', map, ['#3BD58B','#9C27B0','#2196F3'],
+    v => fmt.int(v));
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## 2. BARRA — makeBarOptions(...)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Comportamiento obligatorio:
+- Barras VERTICALES siempre
+- Hover muestra DOS líneas: cantidad de transacciones Y monto AR$
+- Colores: gradiente verde rgba(59,213,139, 0.2→0.9) según intensidad relativa
+
+Firma de la factory:
+  makeBarOptions({ tooltipLines, yCallback })
+  - tooltipLines: array de funciones ctx => string, una por línea del tooltip
+  - yCallback: función para formatear eje Y
+
+Para el gráfico de horas usar renderHourBarChart(canvasId, chartKey, buckets)
+donde buckets es Array<{revenue, orders, units}> de 24 posiciones.
+El tooltip de renderHourBarChart siempre muestra:
+  línea 1 → "Transacciones: N órdenes"
+  línea 2 → "AR$: $X.XXX"
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## 3. LÍNEA — makeLineOptions(...)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Comportamiento obligatorio:
+- Hover en cualquier punto del eje X muestra tooltip vertical (mode: 'index')
+- Items en el tooltip SIEMPRE ordenados de MAYOR a MENOR valor (itemSort)
+- El item con mayor valor aparece PRIMERO (arriba) en el tooltip
+- pointRadius: 0, pointHoverRadius: 4, tension: 0.3, borderWidth: 2
+
+Firma:
+  makeLineOptions({ tooltipLabel, yCallback })
+  - itemSort ya está incluido por defecto en la factory — NO pasarlo manualmente
+  - tooltipLabel: ctx => string para formatear cada línea del tooltip
+
+El itemSort por defecto dentro de makeLineOptions es:
+  itemSort: (a, b) => (b.parsed?.y ?? 0) - (a.parsed?.y ?? 0)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## PROHIBIDO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- Options inline en new Chart()
+- tooltip config duplicada fuera de factories
+- hourBarHTML() para gráficos interactivos
+- itemSort manual fuera de makeLineOptions
+- Gráficos de torta sin leyenda lateral derecha
+- Gráficos de barra con tooltip de una sola línea (siempre deben ser 2: txns + AR$)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## Paleta y constantes
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CHART_COLORS = ['#E63946','#2196F3','#FF9800','#4CAF50','#9C27B0','#00BCD4',
+                '#F44336','#795548','#607D8B','#CDDC39','#FF5722','#009688',
+                '#3F51B5','#FFC107','#E91E63']
+CHART_TICK = { color:'#475569', font:{ family:'JetBrains Mono', size:10 } }
+CHART_GRID = { color:'#d6e0ea', drawBorder:false }
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+## Deploy
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+git add index.html && git commit -m "desc" && git push
+URL: https://talejandre-skipit.github.io/skipit-intelligence/
