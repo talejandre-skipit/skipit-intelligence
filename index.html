@@ -1278,13 +1278,6 @@
             <option value="5+">5+ visitas</option>
             <option value="10+">10+ visitas</option>
           </select>
-          <select id="userSort">
-            <option value="revenue">Orden: por gasto total</option>
-            <option value="visits">Orden: por visitas</option>
-            <option value="units">Orden: por unidades compradas</option>
-            <option value="venues">Orden: por locales distintos</option>
-            <option value="recent">Orden: más recientes</option>
-          </select>
         </div>
 
         <div class="kpi-grid" id="userKpiGrid"></div>
@@ -1302,16 +1295,16 @@
         <div class="table-wrap">
           <table id="tableUsuarios">
             <thead><tr>
-              <th>Usuario</th>
-              <th>Sexo</th>
+              <th data-sort="name">Usuario</th>
+              <th data-sort="gender">Sexo</th>
               <th>Contacto</th>
-              <th>Origen</th>
-              <th class="num">Visitas</th>
-              <th class="num">Locales</th>
-              <th class="num">Unidades</th>
-              <th class="num">Gasto total</th>
-              <th class="num">Ticket prom.</th>
-              <th>Última visita</th>
+              <th data-sort="origin">Origen</th>
+              <th data-sort="visits" class="num">Visitas</th>
+              <th data-sort="venues" class="num">Locales</th>
+              <th data-sort="units" class="num">Unidades</th>
+              <th data-sort="revenue" class="num sorted">Gasto total</th>
+              <th data-sort="ticket" class="num">Ticket prom.</th>
+              <th data-sort="recent">Última visita</th>
             </tr></thead>
             <tbody id="tableUsuariosBody"></tbody>
           </table>
@@ -1426,6 +1419,7 @@ const STATE = {
   users: [],
   products: [],
   brands: [],
+  analyticsContext: null,
   charts: {},
   chartColorRegistry: {},
   // Filters
@@ -1441,7 +1435,7 @@ const STATE = {
   userSearchTerm: '',
   userFilterMulti: '',
   userFilterVisits: '',
-  userSortKey: 'revenue',
+  usersSort: { key: 'revenue', asc: false },
   localesSort: { key: 'revenue', asc: false },
   productsSort: { key: 'revenue', asc: false },
   productSearchTerm: '',
@@ -1474,13 +1468,17 @@ const STATE = {
 
 /* ---------- Brand dictionary ---------- */
 const BRAND_RULES = [
-  { brand: 'Quilmes',       patterns: ['quilmes', 'andes', 'brahma', 'stella artois', 'patagonia', 'iguana', 'bohemia'] },
-  { brand: 'CCU',           patterns: ['imperial', 'heineken', 'schneider', 'salta', 'budweiser', 'corona', 'amstel', 'miller', 'isenbeck'] },
-  { brand: 'Coca Cola',     patterns: ['coca', 'coca cola', 'sprite', 'fanta', 'aquarius', 'powerade', 'dasani', 'schweppes', 'monster'] },
-  { brand: 'Fernet Branca', patterns: ['fernet branca', 'fernet', 'branca', 'brancamenta'] },
-  { brand: 'Red Bull',      patterns: ['red bull', 'redbull'] },
-  { brand: 'Speed',         patterns: ['speed'] },
-  { brand: 'PepsiCo',       patterns: ['pepsi', '7up', 'mirinda', 'gatorade', 'h2oh', 'paso de los toros'] }
+  { brand: 'Quilmes',        patterns: ['quilmes', 'andes', 'brahma', 'stella artois', 'patagonia', 'iguana', 'bohemia', 'norte', 'bieckert'] },
+  { brand: 'CCU',            patterns: ['imperial', 'heineken', 'schneider', 'salta', 'budweiser', 'corona', 'amstel', 'miller', 'isenbeck', 'kunstmann', 'dos equis'] },
+  { brand: 'Coca Cola',      patterns: ['coca', 'coca cola', 'sprite', 'fanta', 'aquarius', 'powerade', 'dasani', 'schweppes', 'monster'] },
+  { brand: 'Fernet Branca',  patterns: ['fernet branca', 'fernet', 'branca', 'brancamenta'] },
+  { brand: 'Grupo Campari',  patterns: ['campari', 'aperol', 'cynar', 'skyy', 'wild turkey', 'appleton', 'bulldog', 'grand marnier', 'forty creek'] },
+  { brand: 'Chandon',        patterns: ['chandon', 'baron b', 'baron b.', 'mumm', 'valmont'] },
+  { brand: 'Red Bull',       patterns: ['red bull', 'redbull'] },
+  { brand: 'Speed',          patterns: ['speed'] },
+  { brand: 'PepsiCo',        patterns: ['pepsi', '7up', 'mirinda', 'gatorade', 'h2oh', 'paso de los toros'] },
+  { brand: 'Paty',           patterns: ['paty'] },
+  { brand: 'Lays / Doritos', patterns: ['lays', 'doritos', 'cheetos', 'ruffles'] }
 ];
 
 const CATEGORY_RULES = [
@@ -1768,7 +1766,7 @@ function ingestRows(rawRows) {
     qty: pick(['quantity', 'cantidad']),
     unitPrice: pick(['unitPrice', 'unit price', 'precio unitario']),
     product: pick(['Product name', 'producto']),
-    payment: pick(['Metodo de pago', 'método de pago', 'payment method', 'payment'])
+    payment: pick(['Medio de Pago', 'medio de pago', 'Metodo de pago', 'método de pago', 'Forma de pago', 'forma de pago', 'payment method', 'payment'])
   };
 
   return rawRows.map(r => {
@@ -2102,6 +2100,62 @@ function recomputeAll() {
   STATE.users = aggregateUsers(STATE.orders);
   STATE.products = aggregateProducts(STATE.rows);
   STATE.brands = aggregateBrands(STATE.rows, STATE.orders);
+  STATE.analyticsContext = buildAnalyticsContext();
+}
+
+function buildAnalyticsContext() {
+  const orders = STATE.orders || [];
+  const rows = STATE.rows || [];
+  const commerces = STATE.commerces || [];
+  const users = STATE.users || [];
+  const products = STATE.products || [];
+  const brands = STATE.brands || [];
+
+  const totalRevenue = orders.reduce((s, o) => s + (o.total || 0), 0);
+  const dates = orders.map(o => o.date).filter(Boolean).sort((a, b) => a - b);
+
+  const resumen = {
+    totalOrdenes: orders.length,
+    totalLineas: rows.length,
+    totalRevenue: Math.round(totalRevenue),
+    ticketPromedio: orders.length ? Math.round(totalRevenue / orders.length) : 0,
+    totalLocales: commerces.length,
+    totalUsuarios: users.length,
+    totalMarcas: brands.filter(b => b.name && b.name !== 'Sin marca detectada').length,
+    totalProductos: products.length,
+    fechaDesde: dates[0] ? dates[0].toLocaleDateString('es-AR') : null,
+    fechaHasta: dates[dates.length - 1] ? dates[dates.length - 1].toLocaleDateString('es-AR') : null
+  };
+
+  // Cap en 1250 órdenes: el API de Haiku cuenta ~160 tokens/orden real
+  // (~160 × 1250 = ~200k tokens sin headroom, quitando id+precio queda ~175k)
+  const MAX_ORDERS = 1250;
+  const ordenesSource = orders.length > MAX_ORDERS
+    ? orders.slice(-MAX_ORDERS)   // las más recientes si hay más
+    : orders;
+  const truncated = orders.length > MAX_ORDERS;
+
+  const ordenes = ordenesSource.map(o => ({
+    fecha: o.date ? o.date.toLocaleDateString('es-AR') : null,
+    hora: o.hour,
+    local: o.commerce,
+    usuario: o.user || o.phone || o.email,
+    genero: o.gender,
+    total: o.total,
+    lineas: (o.lines || []).map(l => ({
+      producto: l.product,
+      marca: l.brand,
+      categoria: l.category,
+      qty: l.qty,
+      subtotal: l.lineTotal
+    }))
+  }));
+
+  return {
+    resumen,
+    truncado: truncated ? `Dataset grande: se muestran las últimas ${MAX_ORDERS} órdenes de ${orders.length} totales.` : null,
+    ordenes
+  };
 }
 
 /* ---------- File upload ---------- */
@@ -2378,7 +2432,7 @@ function destroyChart(name) {
 
 function makeLineOptions({ tooltipLabel, itemSort, yCallback } = {}) {
   const tooltipCfg = { backgroundColor: '#ffffff', borderColor: '#cbd5e1', borderWidth: 1, titleColor: '#0f172a', bodyColor: '#0f172a' };
-  if (itemSort) tooltipCfg.itemSort = itemSort;
+  tooltipCfg.itemSort = itemSort || ((a, b) => (Number(b.parsed?.y) || 0) - (Number(a.parsed?.y) || 0));
   if (tooltipLabel) tooltipCfg.callbacks = { label: tooltipLabel };
   return {
     responsive: true, maintainAspectRatio: false,
@@ -2574,6 +2628,7 @@ function renderTimelineChart(orders) {
         },
         tooltip: {
           backgroundColor: '#ffffff', borderColor: '#94a3b8', borderWidth: 1, titleColor: '#0f172a', bodyColor: '#0f172a',
+          itemSort: (a, b) => (Number(b.parsed?.y) || 0) - (Number(a.parsed?.y) || 0),
           callbacks: {
             label: ctx => {
               const metric = ctx.dataset.metricKey || 'revenue';
@@ -2766,7 +2821,7 @@ function renderDonut(canvasId, nameKey, map, colors, valueFormatter) {
             label: ctx => {
               const val = ctx.parsed;
               const pct = total ? ((val/total)*100).toFixed(1) : '0';
-              return `${ctx.label}: ${valueFormatter(val)} (${pct}%)`;
+              return ` ${valueFormatter(val)} (${pct}%)`;
             }
           }
         },
@@ -3206,13 +3261,19 @@ function renderUsuarios() {
     else if (f === '10+') arr = arr.filter(u => u.visits >= 10);
   }
 
-  arr.sort((a,b) => {
-    switch (STATE.userSortKey) {
-      case 'visits': return b.visits - a.visits;
-      case 'units':  return b.units - a.units;
-      case 'venues': return b.venueCount - a.venueCount;
-      case 'recent': return (b.lastVisit?.getTime() || 0) - (a.lastVisit?.getTime() || 0);
-      default:       return b.revenue - a.revenue;
+  arr.sort((a, b) => {
+    const { key, asc } = STATE.usersSort;
+    const dir = asc ? 1 : -1;
+    switch (key) {
+      case 'name':    return dir * (a.name || '').localeCompare(b.name || '');
+      case 'gender':  return dir * (a.gender || '').localeCompare(b.gender || '');
+      case 'origin':  return dir * (a.origin || '').localeCompare(b.origin || '');
+      case 'visits':  return dir * (a.visits - b.visits);
+      case 'venues':  return dir * (a.venueCount - b.venueCount);
+      case 'units':   return dir * (a.units - b.units);
+      case 'ticket':  return dir * (a.ticket - b.ticket);
+      case 'recent':  return dir * ((a.lastVisit?.getTime() || 0) - (b.lastVisit?.getTime() || 0));
+      default:        return dir * (a.revenue - b.revenue);
     }
   });
 
@@ -3265,6 +3326,14 @@ function renderUsuarios() {
   `;
   document.getElementById('userPrevBtn')?.addEventListener('click', () => { STATE.userPage--; renderUsuarios(); });
   document.getElementById('userNextBtn')?.addEventListener('click', () => { STATE.userPage++; renderUsuarios(); });
+
+  document.querySelectorAll('#tableUsuarios th').forEach(th => {
+    th.classList.remove('sorted', 'asc');
+    if (th.dataset.sort === STATE.usersSort.key) {
+      th.classList.add('sorted');
+      if (STATE.usersSort.asc) th.classList.add('asc');
+    }
+  });
 
   document.querySelectorAll('#tableUsuariosBody tr').forEach(tr => {
     tr.addEventListener('click', () => openUserDrawer(decodeURIComponent(tr.dataset.uid)));
@@ -4164,9 +4233,15 @@ function setupEvents() {
     STATE.userPage = 0;
     renderUsuarios();
   });
-  document.getElementById('userSort').addEventListener('change', e => {
-    STATE.userSortKey = e.target.value;
-    renderUsuarios();
+  document.querySelectorAll('#tableUsuarios th').forEach(th => {
+    th.addEventListener('click', () => {
+      const k = th.dataset.sort;
+      if (!k) return;
+      if (STATE.usersSort.key === k) STATE.usersSort.asc = !STATE.usersSort.asc;
+      else { STATE.usersSort.key = k; STATE.usersSort.asc = false; }
+      STATE.userPage = 0;
+      renderUsuarios();
+    });
   });
 
   document.querySelectorAll('#tableLocales th').forEach(th => {
@@ -4466,7 +4541,10 @@ function buildDataContext(questionText) {
     ', productos=' + facts.productsCount +
     ', revenue_total=$' + facts.totalRevenue +
     ', ticket_promedio=$' + facts.avgTicket +
-    ', período=' + facts.minDate + ' a ' + facts.maxDate + '. ';
+    ', período=' + facts.minDate + ' a ' + facts.maxDate + '. ' +
+    'TOP_LOCALES:\n' + facts.topLocales.join('\n') + '\n' +
+    'TOP_PRODUCTOS:\n' + facts.topProducts.join('\n') + '\n' +
+    'TOP_MARCAS:\n' + facts.topBrands.join('\n') + '\n';
 
   if (queryType === 'general') {
     const usersFull = [...users]
@@ -4475,6 +4553,29 @@ function buildDataContext(questionText) {
         const consumedBrands = [...(u.brands?.keys?.() || [])].join('|') || 'N/A';
         return `USR,${(u.name || 'N/A').replace(/,/g, ';')},${(u.phone || 'N/A').replace(/,/g, ';')},${u.visits || 0},${Math.round(u.revenue || 0)},${consumedBrands.replace(/,/g, ';')}`;
       });
+
+    const byDay = new Map();
+    for (const o of orders) {
+      if (!o.date) continue;
+      const k = o.date.toISOString().slice(0, 10);
+      const e = byDay.get(k) || { revenue: 0, orders: 0 };
+      e.revenue += o.total; e.orders += 1;
+      byDay.set(k, e);
+    }
+    const topDays = [...byDay.entries()]
+      .sort((a, b) => b[1].revenue - a[1].revenue)
+      .slice(0, 10)
+      .map(([d, v]) => `${d} | revenue=${Math.round(v.revenue)} | ordenes=${v.orders}`);
+
+    const byHour = new Array(24).fill(null).map(() => ({ revenue: 0, orders: 0 }));
+    for (const o of orders) {
+      if (o.hour != null) { byHour[o.hour].revenue += o.total; byHour[o.hour].orders += 1; }
+    }
+    const topHours = byHour
+      .map((v, h) => ({ h, ...v }))
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 8)
+      .map(v => `${String(v.h).padStart(2,'0')}h | revenue=${Math.round(v.revenue)} | ordenes=${v.orders}`);
 
     let finalContext =
       baseContext +
@@ -4486,6 +4587,8 @@ function buildDataContext(questionText) {
       `KPI,productos,${facts.productsCount}\n` +
       `KPI,revenue_total,${facts.totalRevenue}\n` +
       `KPI,ticket_promedio,${facts.avgTicket}\n` +
+      'TOP_DIAS:\n' + topDays.join('\n') + '\n' +
+      'TOP_HORAS:\n' + topHours.join('\n') + '\n' +
       'USUARIOS_FULL_CSV:\n' +
       usersFull.join('\n');
     finalContext = enforceContextBudget(finalContext, MAX_CONTEXT_TOKENS);
@@ -4592,16 +4695,31 @@ function buildDataContext(questionText) {
 async function callClaude(userText) {
   const cooldownHint = document.getElementById('chatCooldownHint');
   if (cooldownHint) cooldownHint.textContent = '';
-  const built = buildDataContext(userText);
-  const context = built.context;
-  console.log('[Skipit AI] Tipo de pregunta detectado:', built.queryType);
-  console.log('[Skipit AI] Tokens aproximados del contexto enviado:', built.approxTokens);
-  console.log('CONTEXTO ENVIADO:', context);
+
+  if (!STATE.analyticsContext) {
+    return 'No hay datos cargados todavía. Subí un archivo Excel para que pueda analizar la información.';
+  }
+
+  const ctxJson = JSON.stringify(STATE.analyticsContext);
+  console.log('[Skipit AI] Tokens aproximados del contexto:', Math.ceil(ctxJson.length / 4));
+
+  const systemPrompt =
+    'Sos Skipit AI, un analista de datos especializado en gastronomía de Argentina y Uruguay. ' +
+    'Tenés TODAS las órdenes completas con cada línea de detalle. ' +
+    'Podés responder cualquier pregunta cruzando cualquier dimensión: usuario, local, producto, marca, categoría, fecha, hora, género. ' +
+    'Si te preguntan por un usuario específico, buscá todas sus órdenes. ' +
+    'Si te preguntan qué compró alguien, buscá sus líneas. ' +
+    'No digas nunca que no tenés un dato si ese dato puede estar en alguna orden. ' +
+    'Usá formato argentino para montos: $1.234.567 (punto como separador de miles, sin centavos). ' +
+    'Respondé en español rioplatense. Sé conciso y directo. ' +
+    '\n\nDATOS_DEL_DASHBOARD:\n' + ctxJson;
+
   const messages = [];
   for (const m of chatHistory) {
     messages.push({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content });
   }
   messages.push({ role: 'user', content: userText });
+
   const resp = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -4613,11 +4731,16 @@ async function callClaude(userText) {
     body: JSON.stringify({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 1500,
-      system: context,
+      system: systemPrompt,
       messages
     })
   });
-  if (!resp.ok) { const e = await resp.json(); throw new Error(e.error?.message || 'Error API'); }
+  if (!resp.ok) {
+    const e = await resp.json();
+    const err = new Error(e.error?.message || 'Error API');
+    if (resp.status === 429) err.isRateLimit = true;
+    throw err;
+  }
   const data = await resp.json();
   return data.content[0].text;
 }
@@ -4706,18 +4829,37 @@ function setupChat() {
     const loading = addMsg('ai', 'Analizando datos...');
     loading.classList.add('loading');
     sendBtn.disabled = true; input.disabled = true;
-    try {
-      const deterministic = tryDeterministicKpiAnswer(text);
-      const reply = deterministic || await callClaude(text);
-      loading.remove(); addMsg('ai', reply);
-      chatHistory.push({ role: 'model', content: reply });
-      if (chatHistory.length > 24) chatHistory = chatHistory.slice(-24);
-    } catch(e) {
-      loading.remove();
-      addMsg('ai', 'Error: ' + e.message + '. Verifica tu API key con el boton arriba.');
-      chatHistory.pop();
-    }
-    sendBtn.disabled = false; input.disabled = false; input.focus();
+    const attempt = async () => {
+      try {
+        const deterministic = tryDeterministicKpiAnswer(text);
+        const reply = deterministic || await callClaude(text);
+        loading.remove(); addMsg('ai', reply);
+        chatHistory.push({ role: 'model', content: reply });
+        if (chatHistory.length > 24) chatHistory = chatHistory.slice(-24);
+      } catch(e) {
+        if (e.isRateLimit) {
+          let secs = 65;
+          loading.classList.remove('loading');
+          const tick = setInterval(() => {
+            secs--;
+            loading.textContent = `Rate limit alcanzado. Reintentando en ${secs}s...`;
+            if (secs <= 0) {
+              clearInterval(tick);
+              loading.textContent = 'Analizando datos...';
+              loading.classList.add('loading');
+              attempt();
+            }
+          }, 1000);
+          loading.textContent = `Rate limit alcanzado. Reintentando en ${secs}s...`;
+          return;
+        }
+        loading.remove();
+        addMsg('ai', 'Error: ' + e.message + '. Verifica tu API key con el boton arriba.');
+        chatHistory.pop();
+      }
+      sendBtn.disabled = false; input.disabled = false; input.focus();
+    };
+    await attempt();
     updateModeIndicator();
   }
   sendBtn.addEventListener('click', send);
